@@ -25,9 +25,9 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.event.repository.full_name }}
-            webpsh/webp_server_go
-            webpsh/webp-server-go
-            webpsh/webps
+            WebConcern/webp_server_go
+            WebConcern/webp-server-go
+            WebConcern/webps
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
