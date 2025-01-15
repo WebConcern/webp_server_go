@@ -48,8 +48,8 @@ func Convert(c *fiber.Ctx) error {
 
 		meta = c.Query("meta") // Meta request
 
-		width, _     = strconv.Atoi(c.Query("width"))      // Extra Params
-		height, _    = strconv.Atoi(c.Query("height"))     // Extra Params
+		width, _     = strconv.Atoi(c.Query("w"))      // Extra Params
+		height, _    = strconv.Atoi(c.Query("h"))     // Extra Params
 		maxHeight, _ = strconv.Atoi(c.Query("max_height")) // Extra Params
 		maxWidth, _  = strconv.Atoi(c.Query("max_width"))  // Extra Params
 		extraParams  = config.ExtraParams{
