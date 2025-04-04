@@ -6,7 +6,7 @@ on:
       - 'Makefile'
       - 'config.json'
     branches:
-      - 'master'
+      - 'webconcern'
     tags:
       - '*'
 
