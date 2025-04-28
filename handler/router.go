@@ -109,12 +109,11 @@ func Convert(c *fiber.Ctx) error {
 			reqURIwithQuery = c.OriginalURL()
 		}
 
-		log.Tracef("reqURIwithQuery is %s", reqURIwithQuery)
-
-		// Replace host in the URL
-		// realRemoteAddr = strings.Replace(reqURIwithQuery, reqHost, targetHost, 1)
-		realRemoteAddr, _ = url.JoinPath(targetHost, reqURIwithQuery)
-		log.Debugf("realRemoteAddr is %s", realRemoteAddr)
+		// Remove first leading slash from reqURIwithQuery if present
+		if strings.HasPrefix(reqURIwithQuery, "/") {
+			reqURIwithQuery = reqURIwithQuery[1:]
+		}
+		realRemoteAddr = targetHost + "/" + reqURIwithQuery
 	}
 
 	// Check if the file extension is allowed and not with image extension
