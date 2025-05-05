@@ -24,14 +24,14 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            registry.webconcern.nl/${{ github.event.repository.name }}
+            ghcr.io/${{ github.event.repository.full_name }}
 
-      - name: Login to Container Registry
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: registry.webconcern.nl
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
