@@ -1,6 +1,8 @@
 package schedule
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,16 +53,30 @@ func clearCacheFiles(path string, maxCacheSizeBytes int64) error {
 		return entries[i].modTime.Before(entries[j].modTime)
 	})
 
+	var deleteErr error
 	for _, entry := range entries {
 		if totalSize <= maxCacheSizeBytes {
 			break
 		}
 		if err := os.Remove(entry.path); err != nil {
+			if os.IsNotExist(err) {
+				// Already gone (e.g. removed concurrently); the space is freed.
+				totalSize -= entry.size
+				continue
+			}
 			log.Errorf("Error deleting file %s: %s\n", entry.path, err.Error())
+			deleteErr = errors.Join(deleteErr, err)
 			continue
 		}
 		totalSize -= entry.size
 		log.Infof("Deleted oldest file: %s\n", entry.path)
+	}
+
+	if deleteErr != nil {
+		return deleteErr
+	}
+	if totalSize > maxCacheSizeBytes {
+		return fmt.Errorf("cache %s still above limit after cleanup: %d > %d bytes", path, totalSize, maxCacheSizeBytes)
 	}
 	return nil
 }

@@ -21,10 +21,18 @@ import (
 // origin would hang the request indefinitely while holding ConvertLock, letting
 // goroutines and memory pile up until the pod becomes unresponsive.
 var remoteClient = &http.Client{
-	Timeout: 60 * time.Second,
-	Transport: &http.Transport{
-		ResponseHeaderTimeout: 15 * time.Second,
-	},
+	Timeout:   60 * time.Second,
+	Transport: newRemoteTransport(),
+}
+
+// newRemoteTransport clones http.DefaultTransport so we keep its
+// proxy-from-environment support (HTTP(S)_PROXY/NO_PROXY) and default
+// dial/TLS handshake timeouts, and only adds a response-header timeout to
+// guard against a stalled origin.
+func newRemoteTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 15 * time.Second
+	return t
 }
 
 // Given /path/to/node.png

@@ -39,9 +39,10 @@ func ReadMetadata(p, etag string, subdir string) config.MetaFile {
 	var id, _, _ = getId(p, subdir)
 
 	if buf, err := os.ReadFile(path.Join(config.Config.MetadataPath, subdir, id+".json")); err != nil {
-		// First time reading metadata, create one. Return the written data directly
-		// instead of recursing: if the write fails (e.g. disk full) a re-read would
-		// fail again and recurse forever, overflowing the stack and crashing.
+		// First time reading metadata: create it and return the in-memory result
+		// directly instead of recursing. If the write fails (e.g. disk full) it is
+		// only logged in WriteMetadata; recursing back into ReadMetadata would make
+		// the failed read repeat forever, overflowing the stack and crashing.
 		return WriteMetadata(p, etag, subdir)
 	} else {
 		err = json.Unmarshal(buf, &metadata)
