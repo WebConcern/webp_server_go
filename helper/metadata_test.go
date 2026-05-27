@@ -47,6 +47,15 @@ func TestGetId(t *testing.T) {
 func TestReadMetadataFailureModes(t *testing.T) {
 	// Use a non-image extension so WriteMetadata skips libvips (getImageMeta) and
 	// the test exercises only the read/write/rebuild logic.
+	oldProxyMode := config.ProxyMode
+	oldMetadataPath := config.Config.MetadataPath
+	oldImgPath := config.Config.ImgPath
+	defer func() {
+		config.ProxyMode = oldProxyMode
+		config.Config.MetadataPath = oldMetadataPath
+		config.Config.ImgPath = oldImgPath
+	}()
+
 	config.ProxyMode = false
 	config.Config.MetadataPath = t.TempDir()
 	config.Config.ImgPath = t.TempDir()

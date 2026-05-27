@@ -32,9 +32,14 @@ func clearCacheFiles(path string, maxCacheSizeBytes int64) error {
 	var entries []cacheEntry
 	err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
+			// Fail loudly if we can't even read the cache root, so cleanup doesn't
+			// silently report success when it never scanned the tree.
+			if p == path {
+				return err
+			}
 			// Cache files can be created/removed while cleanup runs. Don't abort
-			// the whole walk over a single transient error (e.g. a file that
-			// disappeared); skip the entry and keep going.
+			// the whole walk over a single transient per-file error (e.g. a file
+			// that disappeared); skip the entry and keep going.
 			if !os.IsNotExist(err) {
 				log.Warnf("Error accessing %s during cache scan: %s", p, err)
 			}

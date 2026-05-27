@@ -28,9 +28,18 @@ var remoteClient = &http.Client{
 // newRemoteTransport clones http.DefaultTransport so we keep its
 // proxy-from-environment support (HTTP(S)_PROXY/NO_PROXY) and default
 // dial/TLS handshake timeouts, and only adds a response-header timeout to
-// guard against a stalled origin.
+// guard against a stalled origin. If DefaultTransport has been replaced
+// (e.g. in tests) and is not an *http.Transport, fall back to a fresh one so
+// package init can't panic.
 func newRemoteTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 15 * time.Second,
+		}
+	}
+	t := base.Clone()
 	t.ResponseHeaderTimeout = 15 * time.Second
 	return t
 }
