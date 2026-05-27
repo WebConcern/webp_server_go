@@ -3,87 +3,64 @@ package schedule
 import (
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 	"webp_server_go/config"
 
 	log "github.com/sirupsen/logrus"
 )
 
-func getDirSize(path string) (int64, error) {
-	// Check if path is a directory and exists
+type cacheEntry struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+// Clear cache: delete oldest files first until the total size of the directory
+// is at or below maxCacheSizeBytes. The directory tree is walked once to build a
+// snapshot, then files are deleted in oldest-first order from that snapshot,
+// avoiding the previous O(files^2) repeated full-tree walks.
+func clearCacheFiles(path string, maxCacheSizeBytes int64) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return 0, nil
+		return nil
 	}
-	var size int64
-	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+
+	var totalSize int64
+	var entries []cacheEntry
+	err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			size += info.Size()
+			totalSize += info.Size()
+			entries = append(entries, cacheEntry{path: p, size: info.Size(), modTime: info.ModTime()})
 		}
 		return nil
 	})
-	return size, err
-}
-
-// Delete the oldest file in the given path
-func clearDirForOldestFiles(path string) error {
-	oldestFile := ""
-	oldestModTime := time.Now()
-
-	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			log.Errorf("Error accessing path %s: %s\n", path, err.Error())
-			return nil
-		}
-
-		if !info.IsDir() && info.ModTime().Before(oldestModTime) {
-			oldestFile = path
-			oldestModTime = info.ModTime()
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Errorf("Error traversing directory: %s\n", err.Error())
-		return err
-	}
-
-	if oldestFile != "" {
-		err := os.Remove(oldestFile)
-		if err != nil {
-			log.Errorf("Error deleting file %s: %s\n", oldestFile, err.Error())
-			return err
-		}
-		log.Infof("Deleted oldest file: %s\n", oldestFile)
-	} else {
-		log.Infoln("No files found in the directory.")
-	}
-	return nil
-}
-
-// Clear cache, size is in bytes that needs to be cleared out
-// Will delete oldest files first, then second oldest, etc.
-// Until all files size are less than maxCacheSizeBytes
-func clearCacheFiles(path string, maxCacheSizeBytes int64) error {
-	dirSize, err := getDirSize(path)
 	if err != nil {
 		log.Errorf("Error getting directory size: %s\n", err.Error())
 		return err
 	}
 
-	for dirSize > maxCacheSizeBytes {
-		err := clearDirForOldestFiles(path)
-		if err != nil {
-			log.Errorf("Error clearing directory: %s\n", err.Error())
-			return err
+	if totalSize <= maxCacheSizeBytes {
+		return nil
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].modTime.Before(entries[j].modTime)
+	})
+
+	for _, entry := range entries {
+		if totalSize <= maxCacheSizeBytes {
+			break
 		}
-		dirSize, err = getDirSize(path)
-		if err != nil {
-			log.Errorf("Error getting directory size: %s\n", err.Error())
-			return err
+		if err := os.Remove(entry.path); err != nil {
+			log.Errorf("Error deleting file %s: %s\n", entry.path, err.Error())
+			continue
 		}
+		totalSize -= entry.size
+		log.Infof("Deleted oldest file: %s\n", entry.path)
 	}
 	return nil
 }
@@ -117,23 +94,32 @@ func CleanCache() {
 func DeleteDeadCache() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	threshold := time.Now().Add(-10 * time.Minute)
+	tempDir := os.TempDir()
 	for {
 		select {
 		case <-ticker.C:
-			_ = filepath.Walk(os.TempDir()+"vips-", func(path string, info os.FileInfo, err error) error {
-				log.Debugf("Checking possible dead cache: %s", path)
+			// Recompute the threshold each tick instead of once at startup.
+			threshold := time.Now().Add(-10 * time.Minute)
+			entries, err := os.ReadDir(tempDir)
+			if err != nil {
+				log.Debugf("Cannot read temp dir %s: %s", tempDir, err)
+				continue
+			}
+			for _, entry := range entries {
+				// libvips spills large images to files/dirs named "vips-*" in TempDir.
+				if !strings.HasPrefix(entry.Name(), "vips-") {
+					continue
+				}
+				info, err := entry.Info()
 				if err != nil {
-					return err
+					continue
 				}
-				if info.IsDir() && info.ModTime().Before(threshold) {
-					// only delete directory
-					log.Warnf("Deleting: %s", path)
-					_ = os.RemoveAll(path)
-					return filepath.SkipDir
+				if info.ModTime().Before(threshold) {
+					target := filepath.Join(tempDir, entry.Name())
+					log.Warnf("Deleting dead vips cache: %s", target)
+					_ = os.RemoveAll(target)
 				}
-				return nil
-			})
+			}
 		}
 	}
 }

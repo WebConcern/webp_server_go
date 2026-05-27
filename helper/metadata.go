@@ -39,15 +39,15 @@ func ReadMetadata(p, etag string, subdir string) config.MetaFile {
 	var id, _, _ = getId(p, subdir)
 
 	if buf, err := os.ReadFile(path.Join(config.Config.MetadataPath, subdir, id+".json")); err != nil {
-		// First time reading metadata, create one
-		WriteMetadata(p, etag, subdir)
-		return ReadMetadata(p, etag, subdir)
+		// First time reading metadata, create one. Return the written data directly
+		// instead of recursing: if the write fails (e.g. disk full) a re-read would
+		// fail again and recurse forever, overflowing the stack and crashing.
+		return WriteMetadata(p, etag, subdir)
 	} else {
 		err = json.Unmarshal(buf, &metadata)
 		if err != nil {
 			log.Warnf("unmarshal metadata error, possible corrupt file, re-building...: %s", err)
-			WriteMetadata(p, etag, subdir)
-			return ReadMetadata(p, etag, subdir)
+			return WriteMetadata(p, etag, subdir)
 		}
 		return metadata
 	}
@@ -77,7 +77,9 @@ func WriteMetadata(p, etag string, subdir string) config.MetaFile {
 	}
 
 	buf, _ := json.Marshal(data)
-	_ = os.WriteFile(path.Join(config.Config.MetadataPath, subdir, data.Id+".json"), buf, 0644)
+	if err := os.WriteFile(path.Join(config.Config.MetadataPath, subdir, data.Id+".json"), buf, 0644); err != nil {
+		log.Errorf("failed to write metadata %s: %s", data.Id, err)
+	}
 	return data
 }
 

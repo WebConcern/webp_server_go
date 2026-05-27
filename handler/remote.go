@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 	"webp_server_go/config"
 	"webp_server_go/helper"
 
@@ -15,6 +16,16 @@ import (
 	"github.com/patrickmn/go-cache"
 	log "github.com/sirupsen/logrus"
 )
+
+// remoteClient is used for all upstream fetches. Without timeouts a stalled
+// origin would hang the request indefinitely while holding ConvertLock, letting
+// goroutines and memory pile up until the pod becomes unresponsive.
+var remoteClient = &http.Client{
+	Timeout: 60 * time.Second,
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+}
 
 // Given /path/to/node.png
 // Delete /path/to/node.png*
@@ -33,7 +44,7 @@ func cleanProxyCache(cacheImagePath string) {
 
 // Download file and return response header
 func downloadFile(filepath string, url string) http.Header {
-	resp, err := http.Get(url)
+	resp, err := remoteClient.Get(url)
 	if err != nil {
 		log.Errorln("Connection to remote error when downloadFile!")
 		return nil
@@ -65,15 +76,19 @@ func downloadFile(filepath string, url string) http.Header {
 	// Create Cache here as a lock, so we can prevent incomplete file from being read
 	// Key: filepath, Value: true
 	config.WriteLock.Set(filepath, true, -1)
+	// Always release the lock, even if the write fails (e.g. disk full). The lock
+	// is set with no expiration, so an early return without Delete would leave it
+	// stuck forever, making ImageExists return false for this file on every future
+	// request (with retry sleeps) -> permanent 404s plus added latency.
+	defer config.WriteLock.Delete(filepath)
 
 	err = os.WriteFile(filepath, bodyBytes.Bytes(), 0600)
 	if err != nil {
-		// not likely to happen
+		log.Errorf("failed to write downloaded file %s: %s", filepath, err)
+		// Remove any partial file so a later request re-fetches cleanly.
+		_ = os.Remove(filepath)
 		return nil
 	}
-
-	// Delete lock here
-	config.WriteLock.Delete(filepath)
 
 	return resp.Header
 }
@@ -129,7 +144,7 @@ func pingURL(url string) string {
 	// this function will try to return identifiable info, currently include etag, content-length as string
 	// anything goes wrong, will return ""
 	var etag, length string
-	resp, err := http.Head(url)
+	resp, err := remoteClient.Head(url)
 	if err != nil {
 		log.Errorln("Connection to remote error when pingUrl:"+url, err)
 		return ""
