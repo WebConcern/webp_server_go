@@ -54,7 +54,7 @@ func cleanProxyCache(cacheImagePath string) {
 func downloadFile(filepath string, url string) http.Header {
 	resp, err := remoteClient.Get(url)
 	if err != nil {
-		log.Errorln("Connection to remote error when downloadFile!")
+		log.Errorf("Connection to remote error when downloadFile %s: %s", url, err)
 		return nil
 	}
 	defer resp.Body.Close()

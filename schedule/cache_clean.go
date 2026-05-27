@@ -32,7 +32,13 @@ func clearCacheFiles(path string, maxCacheSizeBytes int64) error {
 	var entries []cacheEntry
 	err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			// Cache files can be created/removed while cleanup runs. Don't abort
+			// the whole walk over a single transient error (e.g. a file that
+			// disappeared); skip the entry and keep going.
+			if !os.IsNotExist(err) {
+				log.Warnf("Error accessing %s during cache scan: %s", p, err)
+			}
+			return nil
 		}
 		if !info.IsDir() {
 			totalSize += info.Size()
@@ -133,7 +139,9 @@ func DeleteDeadCache() {
 				if info.ModTime().Before(threshold) {
 					target := filepath.Join(tempDir, entry.Name())
 					log.Warnf("Deleting dead vips cache: %s", target)
-					_ = os.RemoveAll(target)
+					if err := os.RemoveAll(target); err != nil {
+						log.Warnf("Failed to delete dead vips cache %s: %s", target, err)
+					}
 				}
 			}
 		}
