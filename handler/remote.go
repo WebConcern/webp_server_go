@@ -7,6 +7,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 	"webp_server_go/config"
 	"webp_server_go/helper"
 
@@ -15,6 +17,50 @@ import (
 	"github.com/patrickmn/go-cache"
 	log "github.com/sirupsen/logrus"
 )
+
+// remoteClient is used for all upstream fetches. Without timeouts a stalled
+// origin would hang the request indefinitely while holding ConvertLock, letting
+// goroutines and memory pile up until the pod becomes unresponsive.
+var (
+	remoteClientOnce sync.Once
+	remoteClient     *http.Client
+)
+
+// getRemoteClient lazily builds the shared upstream HTTP client. It is built on
+// first use rather than at package init because config (the overall timeout) is
+// only loaded after init runs. The client is reused so connections are pooled.
+//
+// config.RemoteRequestTimeout is an overall per-request cap; setting it to 0
+// disables that cap for users fetching very large images over slow origins,
+// while newRemoteTransport's ResponseHeaderTimeout still bounds a stalled origin.
+func getRemoteClient() *http.Client {
+	remoteClientOnce.Do(func() {
+		remoteClient = &http.Client{
+			Timeout:   time.Duration(config.Config.RemoteRequestTimeout) * time.Second,
+			Transport: newRemoteTransport(),
+		}
+	})
+	return remoteClient
+}
+
+// newRemoteTransport clones http.DefaultTransport so we keep its
+// proxy-from-environment support (HTTP(S)_PROXY/NO_PROXY) and default
+// dial/TLS handshake timeouts, and only adds a response-header timeout to
+// guard against a stalled origin. If DefaultTransport has been replaced
+// (e.g. in tests) and is not an *http.Transport, fall back to a fresh one so
+// package init can't panic.
+func newRemoteTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 15 * time.Second,
+		}
+	}
+	t := base.Clone()
+	t.ResponseHeaderTimeout = 15 * time.Second
+	return t
+}
 
 // Given /path/to/node.png
 // Delete /path/to/node.png*
@@ -33,9 +79,9 @@ func cleanProxyCache(cacheImagePath string) {
 
 // Download file and return response header
 func downloadFile(filepath string, url string) http.Header {
-	resp, err := http.Get(url)
+	resp, err := getRemoteClient().Get(url)
 	if err != nil {
-		log.Errorln("Connection to remote error when downloadFile!")
+		log.Errorf("Connection to remote error when downloadFile %s: %s", url, err)
 		return nil
 	}
 	defer resp.Body.Close()
@@ -65,15 +111,19 @@ func downloadFile(filepath string, url string) http.Header {
 	// Create Cache here as a lock, so we can prevent incomplete file from being read
 	// Key: filepath, Value: true
 	config.WriteLock.Set(filepath, true, -1)
+	// Always release the lock, even if the write fails (e.g. disk full). The lock
+	// is set with no expiration, so an early return without Delete would leave it
+	// stuck forever, making ImageExists return false for this file on every future
+	// request (with retry sleeps) -> permanent 404s plus added latency.
+	defer config.WriteLock.Delete(filepath)
 
 	err = os.WriteFile(filepath, bodyBytes.Bytes(), 0600)
 	if err != nil {
-		// not likely to happen
+		log.Errorf("failed to write downloaded file %s: %s", filepath, err)
+		// Remove any partial file so a later request re-fetches cleanly.
+		_ = os.Remove(filepath)
 		return nil
 	}
-
-	// Delete lock here
-	config.WriteLock.Delete(filepath)
 
 	return resp.Header
 }
@@ -129,7 +179,7 @@ func pingURL(url string) string {
 	// this function will try to return identifiable info, currently include etag, content-length as string
 	// anything goes wrong, will return ""
 	var etag, length string
-	resp, err := http.Head(url)
+	resp, err := getRemoteClient().Head(url)
 	if err != nil {
 		log.Errorln("Connection to remote error when pingUrl:"+url, err)
 		return ""
