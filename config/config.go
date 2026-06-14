@@ -107,8 +107,6 @@ type WebpConfig struct {
 	CacheTTL         int  `json:"CACHE_TTL"` // In minutes
 
 	MaxCacheSize int `json:"MAX_CACHE_SIZE"` // In MB, for max cached exhausted/metadata files(plus remote-raw if applicable), 0 means no limit
-
-	RemoteRequestTimeout int `json:"REMOTE_REQUEST_TIMEOUT"` // In seconds, overall timeout for upstream image fetches in proxy mode. 0 disables the overall cap (a stalled origin is still bounded by the response-header timeout)
 }
 
 func NewWebPConfig() *WebpConfig {
@@ -140,8 +138,6 @@ func NewWebPConfig() *WebpConfig {
 		CacheTTL:                   259200,
 
 		MaxCacheSize: 0,
-
-		RemoteRequestTimeout: 60,
 	}
 }
 
@@ -300,15 +296,6 @@ func LoadConfig() {
 			log.Warnf("WEBP_MAX_CACHE_SIZE is not a valid integer, using value in config.json %d", Config.MaxCacheSize)
 		} else {
 			Config.MaxCacheSize = maxCacheSize
-		}
-	}
-
-	if os.Getenv("WEBP_REMOTE_REQUEST_TIMEOUT") != "" {
-		remoteRequestTimeout, err := strconv.Atoi(os.Getenv("WEBP_REMOTE_REQUEST_TIMEOUT"))
-		if err != nil {
-			log.Warnf("WEBP_REMOTE_REQUEST_TIMEOUT is not a valid integer, using value in config.json %d", Config.RemoteRequestTimeout)
-		} else {
-			Config.RemoteRequestTimeout = remoteRequestTimeout
 		}
 	}
 

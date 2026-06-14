@@ -21,9 +21,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Set lowercase image name
-        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-
       - name: Make test
         uses: docker/build-push-action@v6
         with:
@@ -31,7 +28,7 @@ jobs:
           file: ./Dockerfile.CI
           load: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ github.event.repository.full_name }}:latest
 
       - name: Build image test
         uses: docker/build-push-action@v6
@@ -39,7 +36,7 @@ jobs:
           context: .
           load: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ github.event.repository.full_name }}:latest
 
       - name: Install trivy
         run: |
@@ -53,7 +50,7 @@ jobs:
         id: trivy
         with:
           run: |
-            trivy image --no-progress --severity "HIGH,CRITICAL" --ignore-unfixed ${{ env.IMAGE_NAME }}
+            trivy image --no-progress --severity "HIGH,CRITICAL" --ignore-unfixed ghcr.io/${{ github.event.repository.full_name }}
       
       - name: Print CVE
         run: |

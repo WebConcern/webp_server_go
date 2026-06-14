@@ -215,14 +215,6 @@ func Convert(c *fiber.Ctx) error {
 	}
 
 	finalFilename := helper.FindSmallestFiles(availableFiles)
-	// If no candidate file exists on disk (e.g. all conversions failed due to an
-	// OOM or a full disk), don't call SendFile("") which yields a confusing 404.
-	if finalFilename == "" {
-		log.Errorf("No converted output available for %s, conversion likely failed", rawImageAbs)
-		c.Status(http.StatusInternalServerError)
-		_ = c.SendString("Image conversion failed")
-		return nil
-	}
 	contentType := helper.GetFileContentType(finalFilename)
 	c.Set("Content-Type", contentType)
 
