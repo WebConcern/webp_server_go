@@ -102,17 +102,16 @@ func CleanCache() {
 		case <-ticker.C:
 			// MB to bytes
 			maxCacheSizeBytes := int64(config.Config.MaxCacheSize) * 1024 * 1024
-			err := clearCacheFiles(config.Config.RemoteRawPath, maxCacheSizeBytes)
-			if err != nil {
-				log.Warn("Failed to clear remote raw cache")
+			// clearCacheFiles returns nil for a missing path, so any error here is
+			// a real failure worth logging.
+			if err := clearCacheFiles(config.Config.RemoteRawPath, maxCacheSizeBytes); err != nil {
+				log.Warnf("Failed to clear remote raw cache: %s", err)
 			}
-			err = clearCacheFiles(config.Config.ExhaustPath, maxCacheSizeBytes)
-			if err != nil && err != os.ErrNotExist {
-				log.Warn("Failed to clear remote raw cache")
+			if err := clearCacheFiles(config.Config.ExhaustPath, maxCacheSizeBytes); err != nil {
+				log.Warnf("Failed to clear exhaust cache: %s", err)
 			}
-			err = clearCacheFiles(config.Config.MetadataPath, maxCacheSizeBytes)
-			if err != nil && err != os.ErrNotExist {
-				log.Warn("Failed to clear remote raw cache")
+			if err := clearCacheFiles(config.Config.MetadataPath, maxCacheSizeBytes); err != nil {
+				log.Warnf("Failed to clear metadata cache: %s", err)
 			}
 		}
 	}

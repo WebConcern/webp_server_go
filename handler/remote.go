@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"webp_server_go/config"
 	"webp_server_go/helper"
@@ -20,9 +21,26 @@ import (
 // remoteClient is used for all upstream fetches. Without timeouts a stalled
 // origin would hang the request indefinitely while holding ConvertLock, letting
 // goroutines and memory pile up until the pod becomes unresponsive.
-var remoteClient = &http.Client{
-	Timeout:   60 * time.Second,
-	Transport: newRemoteTransport(),
+var (
+	remoteClientOnce sync.Once
+	remoteClient     *http.Client
+)
+
+// getRemoteClient lazily builds the shared upstream HTTP client. It is built on
+// first use rather than at package init because config (the overall timeout) is
+// only loaded after init runs. The client is reused so connections are pooled.
+//
+// config.RemoteRequestTimeout is an overall per-request cap; setting it to 0
+// disables that cap for users fetching very large images over slow origins,
+// while newRemoteTransport's ResponseHeaderTimeout still bounds a stalled origin.
+func getRemoteClient() *http.Client {
+	remoteClientOnce.Do(func() {
+		remoteClient = &http.Client{
+			Timeout:   time.Duration(config.Config.RemoteRequestTimeout) * time.Second,
+			Transport: newRemoteTransport(),
+		}
+	})
+	return remoteClient
 }
 
 // newRemoteTransport clones http.DefaultTransport so we keep its
@@ -61,7 +79,7 @@ func cleanProxyCache(cacheImagePath string) {
 
 // Download file and return response header
 func downloadFile(filepath string, url string) http.Header {
-	resp, err := remoteClient.Get(url)
+	resp, err := getRemoteClient().Get(url)
 	if err != nil {
 		log.Errorf("Connection to remote error when downloadFile %s: %s", url, err)
 		return nil
@@ -161,7 +179,7 @@ func pingURL(url string) string {
 	// this function will try to return identifiable info, currently include etag, content-length as string
 	// anything goes wrong, will return ""
 	var etag, length string
-	resp, err := remoteClient.Head(url)
+	resp, err := getRemoteClient().Head(url)
 	if err != nil {
 		log.Errorln("Connection to remote error when pingUrl:"+url, err)
 		return ""
