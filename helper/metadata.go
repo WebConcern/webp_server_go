@@ -39,15 +39,22 @@ func ReadMetadata(p, etag string, subdir string) config.MetaFile {
 	var id, _, _ = getId(p, subdir)
 
 	if buf, err := os.ReadFile(path.Join(config.Config.MetadataPath, subdir, id+".json")); err != nil {
-		// First time reading metadata, create one
-		WriteMetadata(p, etag, subdir)
-		return ReadMetadata(p, etag, subdir)
+		// A missing file is the normal first-read case. Any other error
+		// (permissions, I/O) shouldn't be silently swallowed, so log it before
+		// rebuilding.
+		if !os.IsNotExist(err) {
+			log.Warnf("could not read metadata %s, rebuilding: %s", id, err)
+		}
+		// Create the metadata and return the in-memory result directly instead of
+		// recursing. If the write fails (e.g. disk full) it is only logged in
+		// WriteMetadata; recursing back into ReadMetadata would make the failed
+		// read repeat forever, overflowing the stack and crashing.
+		return WriteMetadata(p, etag, subdir)
 	} else {
 		err = json.Unmarshal(buf, &metadata)
 		if err != nil {
 			log.Warnf("unmarshal metadata error, possible corrupt file, re-building...: %s", err)
-			WriteMetadata(p, etag, subdir)
-			return ReadMetadata(p, etag, subdir)
+			return WriteMetadata(p, etag, subdir)
 		}
 		return metadata
 	}
@@ -76,8 +83,16 @@ func WriteMetadata(p, etag string, subdir string) config.MetaFile {
 		data.ImageMeta = imageMeta
 	}
 
-	buf, _ := json.Marshal(data)
-	_ = os.WriteFile(path.Join(config.Config.MetadataPath, subdir, data.Id+".json"), buf, 0644)
+	buf, err := json.Marshal(data)
+	if err != nil {
+		// Don't write a truncated/empty file on a marshal failure, which would
+		// later be read back as corrupt and force an endless rebuild.
+		log.Errorf("failed to marshal metadata %s: %s", data.Id, err)
+		return data
+	}
+	if err := os.WriteFile(path.Join(config.Config.MetadataPath, subdir, data.Id+".json"), buf, 0644); err != nil {
+		log.Errorf("failed to write metadata %s: %s", data.Id, err)
+	}
 	return data
 }
 

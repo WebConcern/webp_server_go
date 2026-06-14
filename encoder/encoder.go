@@ -27,7 +27,14 @@ var (
 func init() {
 	vips.LoggingSettings(nil, vips.LogLevelError)
 	vips.Startup(&vips.Config{
-		ConcurrencyLevel: runtime.NumCPU(),
+		// Use GOMAXPROCS rather than NumCPU: in a container NumCPU returns the
+		// host's core count and ignores the cgroup CPU limit, so libvips would
+		// spawn far more worker threads than allowed, multiplying peak memory
+		// (each thread holds pixel buffers) and causing CPU throttling/OOM.
+		// Since Go 1.25 GOMAXPROCS is cgroup-aware.
+		// The cache fields are intentionally left at 0, which disables the libvips
+		// operation cache and keeps idle memory low under a tight memory limit.
+		ConcurrencyLevel: runtime.GOMAXPROCS(0),
 	})
 	boolFalse.Set(false)
 	intMinusOne.Set(-1)

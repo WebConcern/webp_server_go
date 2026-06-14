@@ -1,7 +1,9 @@
 package helper
 
 import (
+	"encoding/json"
 	"net/url"
+	"os"
 	"path"
 	"testing"
 	"webp_server_go/config"
@@ -38,6 +40,58 @@ func TestGetId(t *testing.T) {
 		if id != expectedId || jointPath != expectedPath || santizedPath != expectedSantizedPath {
 			t.Errorf("Test case 2 failed: Expected (%s, %s, %s), but got (%s, %s, %s)",
 				expectedId, expectedPath, expectedSantizedPath, id, jointPath, santizedPath)
+		}
+	})
+}
+
+func TestReadMetadataFailureModes(t *testing.T) {
+	// Use a non-image extension so WriteMetadata skips libvips (getImageMeta) and
+	// the test exercises only the read/write/rebuild logic.
+	oldProxyMode := config.ProxyMode
+	oldMetadataPath := config.Config.MetadataPath
+	oldImgPath := config.Config.ImgPath
+	defer func() {
+		config.ProxyMode = oldProxyMode
+		config.Config.MetadataPath = oldMetadataPath
+		config.Config.ImgPath = oldImgPath
+	}()
+
+	config.ProxyMode = false
+	config.Config.MetadataPath = t.TempDir()
+	config.Config.ImgPath = t.TempDir()
+
+	const (
+		p      = "/does-not-exist.txt"
+		subdir = "local"
+	)
+	expectedId, _, _ := getId(p, subdir)
+	metaPath := path.Join(config.Config.MetadataPath, subdir, expectedId+".json")
+
+	t.Run("creates metadata when file is missing", func(t *testing.T) {
+		meta := ReadMetadata(p, "", subdir)
+		if meta.Id != expectedId {
+			t.Fatalf("expected Id %s, got %s", expectedId, meta.Id)
+		}
+		if _, err := os.Stat(metaPath); err != nil {
+			t.Fatalf("expected metadata file to be created, stat err: %v", err)
+		}
+	})
+
+	t.Run("rebuilds corrupt metadata without recursing", func(t *testing.T) {
+		if err := os.WriteFile(metaPath, []byte("{ not valid json"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		meta := ReadMetadata(p, "", subdir)
+		if meta.Id != expectedId {
+			t.Fatalf("expected Id %s after rebuild, got %s", expectedId, meta.Id)
+		}
+		buf, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parsed config.MetaFile
+		if err := json.Unmarshal(buf, &parsed); err != nil {
+			t.Fatalf("metadata file should be valid JSON after rebuild: %v", err)
 		}
 	})
 }
